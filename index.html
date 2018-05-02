@@ -1,0 +1,666 @@
+<html>
+<head>
+<!-- App Title -->
+  <title>Accessible Areas Mapping Application</title>
+<!-- Imported libraries that are utilized in Application -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.0.0-beta.2.rc.2/leaflet.js"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.0.0-beta.2.rc.2/leaflet.css" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/0.2.3/leaflet.draw.js"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/0.2.3/leaflet.draw.css" rel="stylesheet" />
+  <!-- Import jQuery (when opening in browser while developing and not in a server) -->
+  <script src="https://code.jquery.com/jquery-1.11.1.min.js"></script>
+  <script src="https://code.jquery.com/ui/1.11.1/jquery-ui.min.js"></script>
+  <link rel="stylesheet" href="https://code.jquery.com/ui/1.11.1/themes/smoothness/jquery-ui.css" />
+    <meta charset="utf-8">
+<!-- CSS -->
+  <style>
+    #map{ height: 100%; z-index:1;}  /* Set map as lowest level in order for popups to be always in foreground */
+  </style>
+
+<!-- Script to be run on App Start for User Selection -->
+  <script>
+
+    var userName = "";  // Global variable definition ( Outside of all functions !!! )
+	var userCovDistNotUploaded = 0;	// 
+	var userTotalCovDistance = 0;		// Retrieve from DB each time an upload is performed
+
+	var points = 0;
+	var totalMarker=0;
+	
+    $( function() {
+
+      var selectionFlag = false;
+
+      // Set event on close of popup Window
+      $( "#usel" ).on('dialogclose', function(event) {
+
+        // Check if a user has been selected
+        if (userName != "") {
+        // alert("The user selected is : " + userName);
+        }
+        else{
+          alert("No user selected. Application is being terminated");
+          window.close();
+        }
+
+      });
+
+      $( "#usel" ).dialog({
+          height:500,
+          modal: true,
+          buttons: {
+              "Ok": function() {
+
+                  // Mark that selection has been made
+                  selectionFlag = true;
+
+                  // Get Radiobutton value selected
+                  userName = $('input[name=rbusr]:checked').val();
+
+                  // Close popup window
+                  $( this ).dialog( "close" );
+              }
+          }
+      });
+    } );
+ </script>
+</head>
+
+<body>
+  <!--Mandatory User Selection before page opens -->
+  <div id="usel" title="Select User">
+    <input type="radio" name ="rbusr" value="User1" checked>George<!-- default selection-->
+    <br>
+    <input type="radio" name ="rbusr" value="User2">Eleni
+    <br>
+    <input type="radio" name ="rbusr" value="User3">John
+    <br>
+    <input type="radio" name ="rbusr" value="User4">George
+    <br>
+    <input type="radio" name ="rbusr" value="User5">Panagiotis
+   <br>
+    <input type="radio" name ="rbusr" value="User6">Niki
+    <!--  <br>
+    <input type="radio" name ="rbusr" value="User7">User7 -->
+  </div>
+  <!--Application main page (Map) -->
+  <div id="map"> </div>
+
+<!-- Mandatory script in order to use Firebase -->
+<!-- Για να τεστάρεις με δική σου βάση κάνε comment απο εδώ ==> -->
+  <script src="https://www.gstatic.com/firebasejs/4.12.1/firebase.js"></script>
+  <script>
+    // Initialize Firebase
+    var config = {
+      apiKey: "AIzaSyB37O7Q7PG_8VucWnSizvo4HmY7GdQ34Zc",
+      authDomain: "sdy60.firebaseapp.com",
+      databaseURL: "https://sdy60-4.firebaseio.com",
+      project_id: "sdy60-4",
+      storage_bucket: "sdy60-4.appspot.com"
+      
+    };
+    firebase.initializeApp(config);
+  </script>
+<!-- Για να τεστάρεις με δική σου βάση κάνε comment έως εδώ <== -->
+
+ <!-- Application main functionality -->
+  <script>
+
+  var map;
+  var playGroup;
+  var fireBaseRef = firebase.database(); // Cloud DB reference
+  //   fireBaseRef.remove();
+  var routeName = "route";
+ // var routeRef = firebase.database().ref("User1");
+  //var query = firebase.database().ref("route1");
+  var marker = L.marker();
+  var pos1lat;
+  var pos1lng;
+  var pos2lat;
+  var pos2lng;
+  var pointPrev;
+  var pointNew;
+  var pointList;
+  var totalPoints = [];
+  var travelList = [];
+  var newRoute = true;
+
+  var customControlClear =  L.Control.extend({
+
+    options: {
+      position: 'topleft'
+    },
+
+    onAdd: function (map) {
+
+      var containerClear = L.DomUtil.create('input');
+      containerClear.type="button";
+      //containerClear.title = ( "No cataaaaaaaAAAS" );
+      containerClear.value = "Clear Map Of All Routes";
+
+      containerClear.style.backgroundColor = 'white';
+      containerClear.style.backgroundSize = "40px 180px";
+      containerClear.style.width = '180px';
+      containerClear.style.height = '40px';
+
+      containerClear.onmouseover = function(){
+        containerClear.style.backgroundColor = 'pink';
+      }
+      containerClear.onmouseout = function(){
+        containerClear.style.backgroundColor = 'white';
+      }
+
+      L.DomEvent.addListener(containerClear, 'click', L.DomEvent.stopPropagation)
+                .addListener(containerClear, 'click', L.DomEvent.preventDefault)
+                .addListener(containerClear, 'click', function () { clearFunction(); });
+
+      return containerClear;
+    }
+  });
+
+  var customControlGet =  L.Control.extend({
+
+    options: {
+      position: 'topleft'
+    },
+
+    onAdd: function (map2) {
+
+      var containerGet = L.DomUtil.create('input');
+
+      containerGet.type="button";
+     // containerGet.title="No cat2";
+      containerGet.value = "Display Pedestrian Routes";
+
+      containerGet.style.backgroundColor = 'white';
+      containerGet.style.backgroundSize = "40px 180px";
+      containerGet.style.width = '180px';
+      containerGet.style.height = '40px';
+
+      containerGet.onmouseover = function(){
+        containerGet.style.backgroundColor = 'green';
+      }
+      containerGet.onmouseout = function(){
+        containerGet.style.backgroundColor = 'white';
+      }
+
+      L.DomEvent.addListener(containerGet, 'click', L.DomEvent.stopPropagation)
+                .addListener(containerGet, 'click', L.DomEvent.preventDefault)
+                .addListener(containerGet, 'click', function () { myGet(); });
+  
+
+      return containerGet;
+    }
+  });
+  
+var customControlGetB =  L.Control.extend({
+
+  options: {
+    position: 'topleft'
+  },
+
+  onAdd: function (map3) {
+
+    var containerGetB = L.DomUtil.create('input');
+
+    containerGetB.type="button";
+    //containerGetB.title="No cat3";
+    containerGetB.value = "Display Bicycle Routes";
+
+    containerGetB.style.backgroundColor = 'white';
+    containerGetB.style.backgroundSize = "40px 180px";
+    containerGetB.style.width = '180px';
+    containerGetB.style.height = '40px';
+
+    containerGetB.onmouseover = function(){
+      containerGetB.style.backgroundColor = 'blue';
+    }
+    containerGetB.onmouseout = function(){
+      containerGetB.style.backgroundColor = 'white';
+    }
+
+    L.DomEvent.addListener(containerGetB, 'click', L.DomEvent.stopPropagation)
+              .addListener(containerGetB, 'click', L.DomEvent.preventDefault)
+              .addListener(containerGetB, 'click', function () { getBicycleRoutes(); });
+
+    return containerGetB;
+  }
+});
+
+var customControlGetC =  L.Control.extend({
+
+  options: {
+    position: 'topleft'
+  },
+
+  onAdd: function (map4) {
+
+    var containerGetC = L.DomUtil.create('input');
+
+    containerGetC.type="button";
+   // containerGetC.title="No cat4";
+    containerGetC.value = "Display Wheelchair Routes";
+
+    containerGetC.style.backgroundColor = 'white';
+    containerGetC.style.backgroundSize = "40px 180px";
+    containerGetC.style.width = '180px';
+    containerGetC.style.height = '40px';
+
+    containerGetC.onmouseover = function(){
+      containerGetC.style.backgroundColor = 'yellow';
+    }
+    containerGetC.onmouseout = function(){
+      containerGetC.style.backgroundColor = 'white';
+    }
+
+    L.DomEvent.addListener(containerGetC, 'click', L.DomEvent.stopPropagation)
+              .addListener(containerGetC, 'click', L.DomEvent.preventDefault)
+              .addListener(containerGetC, 'click', function () { getWheelchairRoutes(); });
+
+    return containerGetC;
+  }
+});
+
+  var readyState = function(e){
+
+    map = new L.Map('map').setView([39.158241, 20.987684], 15); // Arta
+
+    L.tileLayer('http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    playGroup = L.layerGroup().addTo(map);
+
+    map.addControl(new customControlClear());
+    map.addControl(new customControlGet());
+    map.addControl(new customControlGetB());
+    map.addControl(new customControlGetC());
+
+    // Function onMarkerClick
+    function onMarkerClick(e) {
+	var rb;
+	var userDetails;
+      var popUpList = $('<div title="Choose Route Category">' +
+                        '<input type="radio" name ="rbcat" value="r1" checked>Pedestrian<br>' +
+                        '<input type="radio" name ="rbcat" value="r2">Bicyle<br>' +
+                        '<input type="radio" name ="rbcat" value="r3">Wheelchair</div>');
+
+      // Set event on close of popup Window
+      popUpList.on('dialogclose', function(event) {
+
+        // Get Radiobutton value selected
+         rb = $('input[name=rbcat]:checked').val();
+       // alert(rb);
+
+      });
+
+      //popUpList.dialog( );
+      popUpList.dialog( {
+                height:250,
+                modal: true,
+                buttons: {
+                "Ok": function() {
+                    
+                    $( this ).dialog( "close" );
+					handleDb(rb);
+                },
+                Cancel: function() {
+                    $( this ).dialog( "close" );
+                } }
+      });
+
+	  
+      //  Update Cloud DB
+      newRoute = true;
+
+    //  fireBaseRef.child(routeName).set(totalPoints);
+    //  totalPoints = [];
+      pointPrev = [];
+      pointNew = [];
+
+    }
+	
+	function handleDb(rb){
+	var travel;
+	 //alert(totalPoints);
+	 //alert(userName);
+	 if(rb=="r1"){
+		travel ="Pedestrian";
+	 }
+	 if(rb=="r2"){
+		travel ="Bicycle";
+	 }
+	 if(rb=="r3"){
+		travel ="Wheelchair";
+	 }
+	 
+	 if(userName=="User1"){
+		 userDetails = {name:"George", age:"40", gender:"male", points:points};
+	 } else if(userName=="User2"){
+		 userDetails = {name:"Eleni", age:"35", gender:"female", points:points};
+	 }else if(userName=="User3"){
+		 userDetails = {name:"John", age:"30", gender:"male", points:points};
+	 }else if(userName=="User4"){
+		 userDetails = {name:"Maria", age:"25", gender:"female", points:points};
+	 }else if(userName=="User5"){
+		 userDetails = {name:"Panagiotis", age:"40", gender:"male", points:points};
+	 }else if(userName=="User5"){
+		 userDetails = {name:"Niki", age:"28", gender:"female", points:points};
+	 }
+	
+	 fireBaseRef.ref(userName).child(travel).child("route1").set(totalPoints);
+	 fireBaseRef.ref(userName).child("User Details").set(userDetails);
+	 
+	 totalPoints = [];
+	}
+
+    // Function onMarkOver
+    function onMarkOver(e) {
+
+      this.openPopup();
+
+    }
+
+    // Function onMapClick
+    function onMapClick(e) {
+
+      if (newRoute) {
+
+        // Mark that new route has been initiated
+        newRoute = false;
+
+        // Point clicked latitude and longtitude
+        pos1lat = e.latlng.lat;
+        pos1lng = e.latlng.lng;
+
+       // Add marker to map
+        marker = L.marker([pos1lat, pos1lng])
+                 .addTo(playGroup)
+                 .bindPopup("Click To Terminate Route")
+                 .on('mouseover', onMarkOver)
+                 .on('click',onMarkerClick);
+
+        // Point Previous coordinates
+        pointPrev = new L.LatLng(pos1lat, pos1lng);
+
+        // Append point to route array
+        totalPoints.push(pointPrev);
+
+      }
+      else
+      {
+
+        // Point clicked latitude and longtitude
+        pos2lat = e.latlng.lat;
+        pos2lng = e.latlng.lng;
+
+        marker = L.marker([pos2lat, pos2lng])
+                .addTo(playGroup)
+                .bindPopup("Click To Terminate Route")
+                .on('mouseover', onMarkOver)
+                .on('click',onMarkerClick);
+
+        pointNew = new L.LatLng(pos2lat, pos2lng);
+
+        pointList = [pointPrev, pointNew];
+
+		var coveredDistance = getDistance([pointPrev.lat, pointPrev.lng], [pointNew.lat, pointNew.lng]);
+			
+		// Sum covered distance of previous and current point to total covered distance  		
+		userTotalCovDistance = userTotalCovDistance +  coveredDistance;
+		
+		window.alert("userTotalCovDistance" + userTotalCovDistance +" coveredDistance:"+coveredDistance);
+		
+		if((userTotalCovDistance - totalMarker) > 100){
+			points = points + 10;
+			window.alert(" Συγχαρητηρια \n Κερδισες 10  points"+"\n Συνολικα points "+points);
+			totalMarker = userTotalCovDistance;
+		}
+		
+			 
+        //  Create new polyline
+        var polylineNew = new L.Polyline(pointList, {
+            color: 'red',
+            weight: 3,
+            opacity: 0.5,
+            smoothFactor: 1
+        }).addTo(playGroup);
+
+        // Set Current click point as previous
+        pointPrev = pointNew;
+
+        // Append point to route array
+        totalPoints.push(e.latlng);
+
+      }
+     
+    }
+
+    map.on('click', onMapClick);
+
+  }
+//------------------------------------------------------------------------------
+//------------------------------------------------------------------------------
+  function myGet(e) {
+
+    var fstPoint = true;
+
+    map.removeLayer(playGroup);
+    playGroup = L.layerGroup().addTo(map);
+    newRoute = true;
+    pointPrev = [];
+    pointNew = [];
+    pointList = [];
+	
+
+    fireBaseRef.ref(userName).child("Pedestrian").child("route1").once("value")
+      .then(function(snapshot) {
+        snapshot.forEach(function(childSnapshot) {
+          var key = childSnapshot.key;
+          var childData = childSnapshot.val();
+          //alert(JSON.stringify(childData));
+
+           if (fstPoint){
+
+            fstPoint = false;
+
+            pos1lat = childData.lat;
+            pos1lng = childData.lng;
+
+            pointPrev = new L.LatLng(pos1lat, pos1lng);
+
+          } 
+           else
+          { 
+        	   
+             pos2lat = childData.lat;
+             pos2lng = childData.lng;
+
+             pointNew = new L.LatLng(pos2lat, pos2lng);
+
+             pointList = [pointPrev, pointNew];
+			 
+			 travelList.push(pointNew);
+
+             marker = L.marker(pointPrev)
+                       .addTo(playGroup);
+
+             marker = L.marker(pointNew)
+                       .addTo(playGroup);
+
+             var poly = new L.Polyline(pointList, {
+                                color: 'red',
+                                weight: 3,
+                                opacity: 0.5,
+                                smoothFactor: 1
+                              }).addTo(playGroup);
+
+             pointPrev = new L.LatLng(pos2lat, pos2lng);
+
+          }
+
+      });
+    });
+
+  }
+
+  function clearFunction(e) {
+
+    map.removeLayer(playGroup);
+
+    playGroup = L.layerGroup().addTo(map);
+    newRoute = true;
+    pointPrev = [];
+    pointNew = [];
+    totalPoints = [];
+
+  }
+
+  function getPedestrianRoutes(e) {
+
+  	
+  }
+  
+  function getBicycleRoutes(e) {
+	  var fstPoint = true;
+
+	    map.removeLayer(playGroup);
+	    playGroup = L.layerGroup().addTo(map);
+	    newRoute = true;
+	    pointPrev = [];
+	    pointNew = [];
+	    pointList = [];
+	    
+	    
+	    fireBaseRef.ref(userName).child("Bicycle").child("route1").once("value")
+	    .then(function(snapshot) {
+	      snapshot.forEach(function(childSnapshot) {
+	    	  var key = childSnapshot.key;
+	          var childData = childSnapshot.val();
+	         
+	          if (fstPoint){
+
+	              fstPoint = false;
+
+	              pos1lat = childData.lat;
+	              pos1lng = childData.lng;
+
+	              pointPrev = new L.LatLng(pos1lat, pos1lng);
+
+	            }
+	            else
+	            {
+
+	               pos2lat = childData.lat;
+	               pos2lng = childData.lng;
+
+	               pointNew = new L.LatLng(pos2lat, pos2lng);
+
+	               pointList = [pointPrev, pointNew];
+	  			 
+	  			 travelList.push(pointNew);
+
+	               marker = L.marker(pointPrev)
+	                         .addTo(playGroup);
+
+	               marker = L.marker(pointNew)
+	                         .addTo(playGroup);
+
+	               var poly = new L.Polyline(pointList, {
+	                                  color: 'red',
+	                                  weight: 3,
+	                                  opacity: 0.5,
+	                                  smoothFactor: 1
+	                                }).addTo(playGroup);
+
+	               pointPrev = new L.LatLng(pos2lat, pos2lng);
+
+	            }
+
+	        });
+	      });
+	}
+  
+  function getWheelchairRoutes(e) {
+	  var fstPoint = true;
+
+	    map.removeLayer(playGroup);
+	    playGroup = L.layerGroup().addTo(map);
+	    newRoute = true;
+	    pointPrev = [];
+	    pointNew = [];
+	    pointList = [];
+		
+	  fireBaseRef.ref(userName).child("Wheelchair").child("route1").once("value").then(function(snapshot) {
+	      snapshot.forEach(function(childSnapshot) {
+	    	  var key = childSnapshot.key;
+	          var childData = childSnapshot.val();
+	          if (fstPoint){
+
+	              fstPoint = false;
+
+	              pos1lat = childData.lat;
+	              pos1lng = childData.lng;
+
+	              pointPrev = new L.LatLng(pos1lat, pos1lng);
+
+	            }
+	            else
+	            {
+
+	               pos2lat = childData.lat;
+	               pos2lng = childData.lng;
+
+	               pointNew = new L.LatLng(pos2lat, pos2lng);
+
+	               pointList = [pointPrev, pointNew];
+	  			 
+	  			 travelList.push(pointNew);
+
+	               marker = L.marker(pointPrev)
+	                         .addTo(playGroup);
+
+	               marker = L.marker(pointNew)
+	                         .addTo(playGroup);
+
+	               var poly = new L.Polyline(pointList, {
+	                                  color: 'red',
+	                                  weight: 3,
+	                                  opacity: 0.5,
+	                                  smoothFactor: 1
+	                                }).addTo(playGroup);
+
+	               pointPrev = new L.LatLng(pos2lat, pos2lng);
+
+	            }
+
+	        });
+	      });
+  
+  }
+  
+  function getDistance(origin, destination) {
+  
+    // return distance in meters
+    var lon1 = toRadian(origin[1]),
+        lat1 = toRadian(origin[0]),
+        lon2 = toRadian(destination[1]),
+        lat2 = toRadian(destination[0]);
+
+    var deltaLat = lat2 - lat1;
+    var deltaLon = lon2 - lon1;
+
+    var a = Math.pow(Math.sin(deltaLat/2), 2) + Math.cos(lat1) * Math.cos(lat2) * Math.pow(Math.sin(deltaLon/2), 2);
+    var c = 2 * Math.asin(Math.sqrt(a));
+    var EARTH_RADIUS = 6371;
+    return c * EARTH_RADIUS * 1000;
+  }
+
+  function toRadian(degree) {
+     return degree*Math.PI/180;
+  }
+
+  
+  window.addEventListener('DOMContentLoaded', readyState);
+
+  </script>
+
+</body>
+</html>
